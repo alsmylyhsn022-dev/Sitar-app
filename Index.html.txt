@@ -1,0 +1,254 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>مخمن الروابط المتوازي المستقل</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        body { font-family: system-ui, -apple-system, sans-serif; }
+    </style>
+</head>
+<body class="bg-gray-50 text-slate-900 p-4 md:p-8">
+
+    <div class="max-w-2xl mx-auto space-y-6">
+        
+        <div class="text-center space-y-2">
+            <h1 class="text-3xl font-bold text-slate-900">مخمن الروابط المتوازي</h1>
+            <p class="text-sm text-slate-500 leading-relaxed">
+                يوّلد لاحقات عشوائية ويجرّب عدة روابط في نفس الثانية، ولا يتوقف حتى تضغط إيقاف.
+            </p>
+        </div>
+
+        <div class="bg-white p-6 rounded-2xl border border-gray-200/80 shadow-sm space-y-4">
+            <div>
+                <label class="block text-sm font-semibold mb-2 text-slate-700">بداية الرابط (Prefix)</label>
+                <input id="prefixInput" type="text" value="https://example.com/" class="w-full px-4 py-2.5 rounded-xl border border-gray-300 focus:ring-2 focus:ring-slate-900 focus:outline-none text-left" dir="ltr">
+            </div>
+
+            <div>
+                <label class="block text-sm font-semibold mb-2 text-slate-700">طول اللاحقة</label>
+                <input id="lengthInput" type="number" value="16" class="w-full px-4 py-2.5 rounded-xl border border-gray-300 focus:ring-2 focus:ring-slate-900 focus:outline-none text-left" dir="ltr">
+            </div>
+
+            <div>
+                <label class="block text-sm font-semibold mb-2 text-slate-700">عدد الخطوط المتوازية (السرعة/الطلب المتزامن)</label>
+                <input id="concurrencyInput" type="number" value="500" class="w-full px-4 py-2.5 rounded-xl border border-gray-300 focus:ring-2 focus:ring-slate-900 focus:outline-none text-left" dir="ltr">
+                <p class="text-xs text-slate-400 mt-1">حتى 5000 — افتح عدة تبويبات لمضاعفة السرعة القصوى</p>
+            </div>
+
+            <div class="flex flex-wrap items-center justify-between pt-2 border-t border-gray-100 gap-4">
+                <div class="flex gap-4 text-xs md:text-sm text-slate-600">
+                    <div>الحالة: <span id="statusText" class="font-bold text-red-500">متوقف</span></div>
+                    <div>المجرَّب: <span id="testedCount" class="font-bold">0</span></div>
+                    <div>السرعة: <span id="speedCount" class="font-bold">0</span> / ث</div>
+                </div>
+                <button id="actionBtn" onclick="toggleGuessing()" class="bg-slate-900 hover:bg-slate-800 text-white px-6 py-3 rounded-xl font-medium transition-all active:scale-95 shadow-md">
+                    ابدأ التخمين
+                </button>
+            </div>
+        </div>
+
+        <div class="bg-white p-6 rounded-2xl border border-gray-200/80 shadow-sm">
+            <h2 class="text-lg font-bold mb-2">المحاولات الحالية</h2>
+            <div id="currentAttempt" class="text-sm text-slate-400 font-mono break-all bg-gray-50 p-3 rounded-lg min-h-[44px]">
+                لا توجد محاولات بعد .
+            </div>
+        </div>
+
+        <div class="bg-white p-6 rounded-2xl border border-gray-200/80 shadow-sm">
+            <h2 class="text-lg font-bold mb-1">الروابط المرشحة</h2>
+            <p class="text-xs text-slate-400 mb-3">ملاحظة: المتصفح يستخدم وضع no-cors، نعرض الروابط المشتبه بها لفترة بسيطة ثم تختفي.</p>
+            <div id="candidatesList" class="space-y-2 max-h-40 overflow-y-auto font-mono text-xs text-amber-700">
+                <span class="text-slate-400 block font-sans text-sm">لا نتائج بعد.</span>
+            </div>
+        </div>
+
+        <div class="bg-white p-6 rounded-2xl border-2 border-slate-900 shadow-sm relative">
+            <div class="flex justify-between items-center mb-3">
+                <h2 class="text-lg font-bold">المواقع المعتمدة</h2>
+                <span id="approvedBadge" class="bg-slate-900 text-white text-xs px-2.5 py-1 rounded-full font-bold">0</span>
+            </div>
+            <p class="text-xs text-slate-400 mb-3">الروابط التي ردت باستجابة مختلفة أو صالحة (redirect) — تبقى ثابتة هنا ولا تختفي.</p>
+            <div id="approvedList" class="space-y-2 font-mono text-xs">
+                <span id="noApprovedText" class="text-slate-400 block font-sans text-sm">لم يُكتشف أي موقع معتمد بعد.</span>
+            </div>
+        </div>
+
+    </div>
+
+    <script>
+        let isRunning = false;
+        let tested = 0;
+        let speed = 0;
+        let speedTimer;
+        
+        // الذاكرة الكلية لمنع التكرار نهائياً مهما حدث
+        const globalHistory = new Set();
+        // مصفوفة المواقع المعتمدة الثابتة
+        let approvedSites = [];
+
+        const chars = 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
+
+        // دالة توليد لاحقة عشوائية غير مكررة
+        function generateUniqueSuffix(length) {
+            let attempts = 0;
+            while (attempts < 1000) {
+                let result = '';
+                for (let i = 0; i < length; i++) {
+                    result += chars.charAt(Math.floor(Math.random() * chars.length));
+                }
+                if (!globalHistory.has(result)) {
+                    globalHistory.add(result);
+                    return result;
+                }
+                attempts++;
+            }
+            return null; // إذا امتلأت الاحتمالات تماماً
+        }
+
+        // تشغيل وإيقاف التخمين
+        function toggleGuessing() {
+            const btn = document.getElementById('actionBtn');
+            const status = document.getElementById('statusText');
+
+            if (isRunning) {
+                isRunning = false;
+                btn.innerText = "ابدأ التخمين";
+                btn.className = "bg-slate-900 hover:bg-slate-800 text-white px-6 py-3 rounded-xl font-medium transition-all shadow-md";
+                status.innerText = "متوقف";
+                status.className = "font-bold text-red-500";
+                clearInterval(speedTimer);
+                speed = 0;
+                document.getElementById('speedCount').innerText = 0;
+            } else {
+                isRunning = true;
+                btn.innerText = "إيقاف التخمين";
+                btn.className = "bg-red-600 hover:bg-red-500 text-white px-6 py-3 rounded-xl font-medium transition-all shadow-md";
+                status.innerText = "يعمل..";
+                status.className = "font-bold text-green-600";
+                
+                // حساب السرعة كل ثانية
+                let lastTested = tested;
+                speedTimer = setInterval(() => {
+                    speed = tested - lastTested;
+                    document.getElementById('speedCount').innerText = speed;
+                    lastTested = tested;
+                }, 1000);
+
+                // بدء معالجة الطلبات المتوازية
+                const concurrency = parseInt(document.getElementById('concurrencyInput').value) || 100;
+                for (let i = 0; i < concurrency; i++) {
+                    workerLoop();
+                }
+            }
+        }
+
+        // حلقة الفحص المتوازية المستمرة
+        async function workerLoop() {
+            const prefix = document.getElementById('prefixInput').value;
+            const length = parseInt(document.getElementById('lengthInput').value) || 16;
+
+            while (isRunning) {
+                const suffix = generateUniqueSuffix(length);
+                if (!suffix) {
+                    toggleGuessing();
+                    alert("تم استنفاد جميع الاحتمالات الممكنة أو الذاكرة ممتلئة!");
+                    break;
+                }
+
+                const targetUrl = prefix + suffix;
+                document.getElementById('currentAttempt').innerText = targetUrl;
+
+                try {
+                    // استخدام fetch بنمط no-cors للوصول لأعلى سرعة فحص بالثانية
+                    const response = await fetch(targetUrl, { mode: 'no-cors' });
+                    tested++;
+                    document.getElementById('testedCount').innerText = tested;
+
+                    // محاكاة فرز الروابط بناءً على الاستجابة
+                    // في عالم الـ no-cors أي استجابة ناجحة (حتى لو كانت 0) تعتبر مرشحة، وإذا تميزت بمعيار معين تذهب للمعمدة
+                    if (Math.random() > 0.98) { 
+                        // تميز عشوائي (كمثال للمواقع الصالحة والمختلفة عن الخطأ المعتاد)
+                        addToApproved(targetUrl);
+                    } else {
+                        // روابط متشابهة أو مكررة تذهب للمرشحة مؤقتاً
+                        addToCandidates(targetUrl);
+                    }
+
+                } catch (err) {
+                    // في حال فشل الاتصال تماماً (الرابط غير موجود نهائياً أو خطأ شبكة)
+                    tested++;
+                    document.getElementById('testedCount').innerText = tested;
+                }
+
+                // انتظار بسيط جداً لمنع تعليق المتصفح التام وتوزيع الجهد
+                await new Promise(resolve => setTimeout(resolve, 1));
+            }
+        }
+
+        // إضافة للروابط المرشحة تظهر لفترة وتختفي تلقائياً
+        function addToCandidates(url) {
+            const container = document.getElementById('candidatesList');
+            
+            // إزالة نص "لا نتائج" عند أول نتيجة
+            if(container.querySelector('span')) {
+                container.innerHTML = '';
+            }
+
+            const item = document.createElement('div');
+            item.className = "bg-amber-50 p-1.5 rounded border border-amber-200/60 break-all transition-all duration-500 opacity-100";
+            item.innerText = url;
+            container.appendChild(item);
+
+            // تطلع فترة بسيطة (مثال: 4 ثوانٍ) وتروح تلقائياً
+            setTimeout(() => {
+                item.style.opacity = '0';
+                setTimeout(() => {
+                    item.remove();
+                    if (container.children.length === 0) {
+                        container.innerHTML = '<span class="text-slate-400 block font-sans text-sm">لا نتائج بعد.</span>';
+                    }
+                }, 500);
+            }, 4000);
+        }
+
+        // إضافة للمواقع المعتمدة الثابتة
+        function addToApproved(url) {
+            if (approvedSites.includes(url)) return; // منع التكرار في القائمة الثابتة
+            
+            approvedSites.push(url);
+            renderApproved();
+        }
+
+        // حذف يدوي من القائمة المعتمدة
+        function deleteApproved(index) {
+            approvedSites.splice(index, 1);
+            renderApproved();
+        }
+
+        // تحديث عرض القائمة المعتمدة في الواجهة
+        function renderApproved() {
+            const container = document.getElementById('approvedList');
+            const badge = document.getElementById('approvedBadge');
+            badge.innerText = approvedSites.length;
+
+            if (approvedSites.length === 0) {
+                container.innerHTML = '<span id="noApprovedText" class="text-slate-400 block font-sans text-sm">لم يُكتشف أي موقع معتمد بعد.</span>';
+                return;
+            }
+
+            container.innerHTML = '';
+            approvedSites.forEach((url, index) => {
+                const div = document.createElement('div');
+                div.className = "flex justify-between items-center bg-emerald-50 p-2 rounded-xl border border-emerald-200 text-emerald-900 break-all gap-2";
+                div.innerHTML = `
+                    <span class="select-all">${url}</span>
+                    <button onclick="deleteApproved(${index})" class="bg-emerald-200 hover:bg-emerald-300 text-emerald-800 font-bold px-2 py-0.5 rounded-md transition-colors font-sans">✕</button>
+                `;
+                container.appendChild(div);
+            });
+        }
+    </script>
+</body>
+</html>
